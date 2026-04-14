@@ -8,3 +8,5 @@ xgboost
 openpyxl
 reportlab
 numpy
+lightgdm
+catboost
