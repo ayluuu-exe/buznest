@@ -4,6 +4,7 @@ import numpy as np
 from datetime import timedelta
 import plotly.graph_objects as go
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_absolute_error, r2_score
 
 # High-Performance ML Engines
 from xgboost import XGBRegressor
