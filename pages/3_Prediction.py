@@ -4,7 +4,6 @@ import numpy as np
 from datetime import timedelta
 import plotly.graph_objects as go
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_absolute_error, r2_score
 
 # High-Performance ML Engines
 from xgboost import XGBRegressor
@@ -30,8 +29,10 @@ supabase = init_connection()
 # Theme Colors
 BLUE, GREEN, AMBER, INDIGO = "#2563EB", "#10B981", "#F59E0B", "#6366F1"
 
-# ── DATA LOADING (PAGINATED FOR 26K+ RECORDS) ────────────────────────────────
-def load_data():
+# ── DATA LOADING (OPTIMIZED WITH CACHING) ────────────────────────────────
+# Caches the data for 1 hour (3600 seconds) so it doesn't hit Supabase on every slider move
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_data(user):
     """
     Fetches all records for the user by bypassing the 1000-row Supabase limit 
     using recursive range-based pagination.
@@ -39,7 +40,6 @@ def load_data():
     all_data = []
     page_size = 1000 
     start = 0
-    user = st.session_state.get("username", "demo_user")
     
     try:
         # Get total count first
@@ -48,14 +48,13 @@ def load_data():
         
         if total_count == 0: return pd.DataFrame()
 
-        with st.spinner("📥 Synchronising historical data..."):
-            for start in range(0, total_count, page_size):
-                res = supabase.table("buznet_data").select("*") \
-                    .eq("client_id", user) \
-                    .range(start, start + page_size - 1) \
-                    .execute()
-                if not res.data: break
-                all_data.extend(res.data)
+        for start in range(0, total_count, page_size):
+            res = supabase.table("buznet_data").select("*") \
+                .eq("client_id", user) \
+                .range(start, start + page_size - 1) \
+                .execute()
+            if not res.data: break
+            all_data.extend(res.data)
         
         if all_data:
             df = pd.DataFrame(all_data)
@@ -66,8 +65,7 @@ def load_data():
             return df
         return pd.DataFrame()
     except Exception as e:
-        st.error(f"Data Connection Error: {e}")
-        return pd.DataFrame()
+        return pd.DataFrame() # Return empty DF on error to avoid breaking UI
 
 # ── ADVANCED FEATURE ENGINEERING ────────────────────────────────────────────
 def make_features(df, target_col=None):
@@ -91,13 +89,14 @@ FEATURES = ['dayofweek', 'month', 'quarter', 'dayofyear', 'dayofmonth', 'is_week
 page_header("🔮", "High-Accuracy BI Predictions", 
             "Powered by XGBoost, CatBoost, and LightGBM Engines")
 
-df = load_data()
+# Fetch User Data using the Cached Function
+current_user = st.session_state.get("username", "demo_user")
+with st.spinner("📥 Synchronising historical data..."):
+    df = load_data(current_user)
 
 if df.empty:
     st.warning("No data available. Please add records in Data Intake first.")
     st.stop()
-
-st.toast(f"✅ Data Engine Synchronized: {len(df):,} records loaded.")
 
 products = sorted(df['Product'].unique())
 if not products:
@@ -108,10 +107,11 @@ st.markdown('<div class="bz-section-title">📦 Configure Forecast</div>', unsaf
 sc1, sc2, sc3 = st.columns(3)
 
 selected_product = sc1.selectbox("Select Product", products)
-forecast_period   = sc2.selectbox("Time Duration", ["1 Week", "1 Month", "1 Quarter", "1 Year"])
-safety_pct       = sc3.slider("Safety Stock % (Buffer)", 0, 50, 10)
+forecast_period  = sc2.selectbox("Time Duration", ["1 Week", "1 Month", "1 Quarter", "1 Year"])
 
-profit_margin = st.slider("Profit Margin %", 1, 100, 20)
+# These sliders are now decoupled from the ML Engine!
+safety_pct       = sc3.slider("Safety Stock % (Buffer)", 0, 50, 10)
+profit_margin    = st.slider("Profit Margin %", 1, 100, 20)
 
 period_map = {"1 Week": 7, "1 Month": 30, "1 Quarter": 90, "1 Year": 365}
 horizon_days = period_map[forecast_period]
@@ -122,7 +122,7 @@ if len(p_df) < 15:
     st.warning(f"⚠️ High-accuracy models require a minimum history (15+ records). Current: {len(p_df)}")
     st.stop()
 
-# ── ML PIPELINE ──────────────────────────────────────────────────────────────
+# ── ML PIPELINE (CACHED) ──────────────────────────────────────────────────────
 
 def get_optimized_model(model_type):
     if model_type == "xgb":
@@ -132,7 +132,7 @@ def get_optimized_model(model_type):
     else:
         return LGBMRegressor(n_estimators=300, learning_rate=0.05, max_depth=6, verbose=-1, random_state=42)
 
-def train_and_forecast(data, target_col, model_type):
+def train_and_forecast(data, target_col, model_type, horizon):
     feat_df = make_features(data, target_col=target_col)
     X = feat_df[FEATURES]
     y = feat_df[target_col]
@@ -155,7 +155,7 @@ def train_and_forecast(data, target_col, model_type):
 
     forecasts = []
     curr_hist = feat_df.copy()
-    for _ in range(horizon_days):
+    for _ in range(horizon):
         next_dt = curr_hist['Date'].max() + timedelta(days=1)
         nr = pd.DataFrame({'Date': [next_dt]})
         nr['dayofweek'] = nr['Date'].dt.dayofweek
@@ -174,11 +174,22 @@ def train_and_forecast(data, target_col, model_type):
 
     return np.array(forecasts), {"mae": mae, "r2": r2}
 
-with st.spinner(f"🤖 Recalculating {selected_product} forecast..."):
-    pred_s, acc_s = train_and_forecast(p_df, 'Sold', 'xgb')
-    pred_r, acc_r = train_and_forecast(p_df, 'Revenue', 'cat')
-    pred_p_base, acc_p = train_and_forecast(p_df, 'Production', 'lgbm')
-    pred_p = pred_p_base * (1 + safety_pct / 100)
+# CACHE THE MASTER PREDICTION FUNCTION
+@st.cache_data(show_spinner=False)
+def generate_baseline_forecasts(data, horizon):
+    """Caches the heavy model training. Only re-runs if data or horizon changes."""
+    pred_s, acc_s = train_and_forecast(data, 'Sold', 'xgb', horizon)
+    pred_r, acc_r = train_and_forecast(data, 'Revenue', 'cat', horizon)
+    pred_p_base, acc_p = train_and_forecast(data, 'Production', 'lgbm', horizon)
+    return pred_s, pred_r, pred_p_base, acc_s, acc_r, acc_p
+
+with st.spinner(f"🤖 Processing AI Forecasts for {selected_product}..."):
+    # Fetch baseline predictions from cache
+    pred_s, pred_r, pred_p_base, acc_s, acc_r, acc_p = generate_baseline_forecasts(p_df, horizon_days)
+
+# ── INSTANT MATH (DECOUPLED FROM UI SLIDERS) ──────────────────────────────────
+# Sliders now instantly multiply the cached baseline, avoiding heavy re-training
+pred_p = pred_p_base * (1 + safety_pct / 100)
 
 # ── SUMMARY KPIs ──────────────────────────────────────────────────────────────
 st.markdown("---")
@@ -206,7 +217,6 @@ for col, icon, lab, val, tag, clr in stats:
 st.markdown("---")
 future_dates = [p_df['Date'].max() + timedelta(days=x) for x in range(1, horizon_days + 1)]
 hist_d = p_df.sort_values('Date')
-# Show only the last 45 days of actual history for a "Short Timeline" view
 short_hist = hist_d.tail(45)
 
 col_chart1, col_chart2 = st.columns(2)
@@ -240,5 +250,3 @@ f_table = pd.DataFrame({
 })
 
 st.dataframe(f_table, use_container_width=True, hide_index=True)
-
-
