@@ -249,7 +249,7 @@ MODULES = [
      "tags":["AI Insights","PDF Report","Alerts"]},
     {"icon":"⚙️","title":"Settings",
      "desc":"Change password, notification preferences, data export.",
-     "tags":["Password","Currency","Notifications"]},
+     "tags":["Password","Notifications"]},
 ]
 
 st.markdown('<div class="mod-grid">', unsafe_allow_html=True)
