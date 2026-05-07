@@ -63,7 +63,7 @@ def load_all_data():
         st.error(f"Error loading records: {e}")
         return pd.DataFrame()
 
-page_header("📝", "Smart Data Intake", "Add, upload, and manage your full dataset (26k+ records)")
+page_header("📝", "Smart Data Intake", "Add, upload, and manage your full dataset")
 
 tab1, tab2, tab3 = st.tabs(["✍️ Manual Entry", "📁 Bulk CSV Upload", "📋 View & Edit Records"])
 
