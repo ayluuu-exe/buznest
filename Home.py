@@ -191,7 +191,7 @@ st.markdown("""
     <div class="hero-chips">
         <span class="chip">📊 Real-Time Analytics</span>
         <span class="chip">🤖 Multi-Model ML</span>
-        <span class="chip">☁️ Cloud-Backed</span>
+        <span class="chip">☁️ Cloud-Backend</span>
         <span class="chip">🔮 AI Forecasting</span>
         <span class="chip">📥 Smart Export</span>
         <span class="chip">🔒 Secure Auth</span>
@@ -248,7 +248,7 @@ MODULES = [
      "desc":"AI-generated business insights, alerts, trend analysis, downloadable PDF reports.",
      "tags":["AI Insights","PDF Report","Alerts"]},
     {"icon":"⚙️","title":"Settings",
-     "desc":"Change password, currency selection, notification preferences, data export.",
+     "desc":"Change password, notification preferences, data export.",
      "tags":["Password","Currency","Notifications"]},
 ]
 
